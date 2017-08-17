@@ -21,6 +21,7 @@
 
 #define RARP_HDRLEN 28  // RARP header length
 #define ETH_HDRLEN 14   // Ethernet header length
+//#define	IP_MAXPACKET	65535		/* maximum packet size */
 
 
 /*
@@ -95,7 +96,7 @@ int main (int argc, char **argv)
 	int /*i, status,*/ frame_length, sd, bytes;
 	rarp_header rarphdr;
 	unsigned char src_mac[6], dst_mac[6], ether_frame[14];
-	//struct addrinfo hints, *res;
+	unsigned char rarpframe[sizeof(ether_frame) + sizeof(struct _rarp_hdr)];
 	struct sockaddr_ll device;
 	memset (&device, 0, sizeof (struct sockaddr_ll));
 
@@ -124,7 +125,7 @@ int main (int argc, char **argv)
 	rarphdr.protocol_type = htons (ETH_P_IP);	// Protocol type (16 bits): 2048 for IP
 	rarphdr.hardware_len = 6;					// Hardware address length (8 bits): 6 bytes for MAC address
 	rarphdr.protocol_len = 4;					// Protocol address length (8 bits): 4 bytes for IPv4 address
-	rarphdr.opcode = 3;							//rarphdr.opcode = htons (ARPOP_REQUEST);
+	rarphdr.opcode = 3;							//rarphdr.opcode = htons (RARPOP_REQUEST);
 
 	memcpy (rarphdr.sender_mac, src_mac, 6 * sizeof (unsigned char));
 	memset (rarphdr.target_mac, 0, 6 * sizeof (unsigned char));		// Target hardware address (48 bits): zero, since we don't know it yet.
@@ -144,10 +145,9 @@ int main (int argc, char **argv)
 
 	printf("%s 6 %s\n", __func__, (errno ? strerror(errno) : "ok"));
 
-	// Next is ethernet frame data (ARP header).
-
-	// ARP header
-	memcpy (ether_frame + ETH_HDRLEN, &rarphdr, RARP_HDRLEN * sizeof (unsigned char));
+	memset(rarpframe, 0, sizeof(rarpframe));
+	memcpy(rarpframe, ether_frame, sizeof(ether_frame));
+	memcpy(rarpframe + sizeof(ether_frame), &rarphdr, RARP_HDRLEN * sizeof (unsigned char));
 
 	// Submit request for a raw socket descriptor.
 	if (0 > (sd = socket (PF_PACKET, SOCK_RAW, htons (ETH_P_ALL)))) {
@@ -158,10 +158,17 @@ int main (int argc, char **argv)
 	printf("%s 7 %s\n", __func__, (errno ? strerror(errno) : "ok"));
 
 	// Send ethernet frame to socket.
-	if ((bytes = sendto (sd, &rarphdr, frame_length, 0, (struct sockaddr *) &device, sizeof (struct sockaddr_ll))) <= 0) {
+	if (0 >= (bytes = sendto (sd,
+	                          rarpframe,
+	                          sizeof(rarpframe),
+	                          0,
+	                          (struct sockaddr *) &device,
+	                          sizeof (struct sockaddr_ll))))
+	{
 		perror ("sendto() failed");
 		return -1;
 	}
+
 	printf("%s 8 %s\n", __func__, (errno ? strerror(errno) : "ok"));
 
 	// Close socket descriptor.
