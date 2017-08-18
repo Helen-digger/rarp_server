@@ -7,7 +7,7 @@ all:
 	$(CC) -Wall -o rarp_client rarp_client.c
 	$(CC) -Wall -o rarp_server rarp_server.c
 clean:
-	rm -f rarp_client rarp_server *.o *.a *.so 
+	rm -f rarp_client rarp_server parse_arp *.o *.a *.so 
 
 
 

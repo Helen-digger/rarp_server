@@ -1,109 +1,102 @@
-#include <stdio.h>
-#include <stdlib.h>
-#include <unistd.h>           // close()
-#include <string.h>           // strcpy, memset()
+#include "protocol.h"
 
-#include <netinet/ip.h>       // IP_MAXPACKET (65535)
-#include <sys/types.h>        // needed for socket(), uint8_t, uint16_t
-#include <sys/socket.h>       // needed for socket()
-#include <linux/if_ether.h>   // ETH_P_ARP = 0x0806, ETH_P_ALL = 0x0003
-#include <net/ethernet.h>
 
-#include <errno.h>            // errno, perror()
+int get_ip_from_arp(unsigned char * mac)
+{
+    FILE *arpCache = fopen(ARP_CACHE, "r");
+    if (!arpCache)
+    {
+        perror("Arp Cache: Failed to open file \"" ARP_CACHE "\"");
+        return 1;
+    }
 
-// Define an struct for ARP header
-typedef struct _rarp_hdr rarp_hdr;
-struct _rarp_hdr {
-  uint16_t htype;
-  uint16_t ptype;
-  uint8_t hlen;
-  uint8_t plen;
-  uint16_t opcode;
-  uint8_t sender_mac[6];
-  uint8_t sender_ip[4];
-  uint8_t target_mac[6];
-  uint8_t target_ip[4];
-};
+    /* Ignore the first line, which contains the header */
+    char header[ARP_BUFFER_LEN];
+    if (!fgets(header, sizeof(header), arpCache))
+    {
+        return 1;
+    }
 
-#define ARPOP_RREQUEST  3   /* RARP request     */
-#define ARPOP_RREPLY  4   /* RARP reply     */
-#define RARP_HDRLEN 28  // RARP header length
+    char ipAddr[ARP_BUFFER_LEN], hwAddr[ARP_BUFFER_LEN], device[ARP_BUFFER_LEN], state[ARP_BUFFER_LEN];
+    int count = 0;
+    while (4 == fscanf(arpCache, ARP_LINE_FORMAT, ipAddr, state, hwAddr, device))
+    {	
+        printf("%03d: Mac Address of [%s]\t on [%s] is \"%s\"  State: %s\n",
+                ++count, ipAddr, device, hwAddr, state);
+    }
 
-// Function prototypes
+    
+    fclose(arpCache);
+    return 0;
+}
+
+int fprintf_rarp_frame(FILE * f, struct rarp_frame * b)
+{
+	fprintf(f, "%s %s\n", __func__, (errno ? strerror(errno) : "ok"));
+	// Print Ethernet frame header.
+	fprintf(f, "\nEthernet frame header:\n");
+	fprintf(f, "Dest   MAC: %02x:%02x:%02x:%02x:%02x:%02x\n",
+	        b->frame_hdr.h_dest[0], b->frame_hdr.h_dest[1],
+	        b->frame_hdr.h_dest[2], b->frame_hdr.h_dest[3],
+	        b->frame_hdr.h_dest[4], b->frame_hdr.h_dest[5]);
+	fprintf(f, "Source MAC: %02x:%02x:%02x:%02x:%02x:%02x\n",
+	        b->frame_hdr.h_source[0], b->frame_hdr.h_source[1],
+	        b->frame_hdr.h_source[2], b->frame_hdr.h_source[3],
+	        b->frame_hdr.h_source[4], b->frame_hdr.h_source[5]);
+	// Next is ethernet type code (ETH_P_ARP for ARP).
+	// http://www.iana.org/assignments/ethernet-numbers
+	fprintf(f, "Eth type:   %04x\n", ntohs(b->frame_hdr.h_proto));
+
+	fprintf(f, "\nEthernet data (RARP header):\n");
+	fprintf(f, "Hardware type: %X\n", ntohs (b->rarphdr.ar_hrd));
+	fprintf(f, "Protocol type: %X\n", ntohs (b->rarphdr.ar_pro));
+	fprintf(f, "lladdr length: %X\n", b->rarphdr.ar_hln);
+	fprintf(f, "IPv4 addr len: %X\n", b->rarphdr.ar_pln);
+	fprintf(f, "Opcode       : %X\n", ntohs (b->rarphdr.ar_op));
+
+	fprintf(f, "Sender  (MAC) address: %02x:%02x:%02x:%02x:%02x:%02x\n",
+	        b->body.ar_sha[0], b->body.ar_sha[1],
+	        b->body.ar_sha[2], b->body.ar_sha[3],
+	        b->body.ar_sha[4], b->body.ar_sha[5]);
+	fprintf(f, "Sender IPv4 addr:      %u.%u.%u.%u\n",
+			b->body.ar_sip[0], b->body.ar_sip[1],
+			b->body.ar_sip[2], b->body.ar_sip[3]);
+	fprintf(f, "Target MAC:            %02x:%02x:%02x:%02x:%02x:%02x\n",
+	        b->body.ar_tha[0], b->body.ar_tha[1],
+	        b->body.ar_tha[2], b->body.ar_tha[3],
+	        b->body.ar_tha[4], b->body.ar_tha[5]);
+	fprintf(f, "Target IPv4 addr:      %u.%u.%u.%u\n",
+			b->body.ar_tip[0], b->body.ar_tip[1],
+			b->body.ar_tip[2], b->body.ar_tip[3]);
+
+	return 0;
+}
 
 int main (int argc, char **argv)
 {
-  int i, sd, status;
-  unsigned char ether_frame[14];
-  rarp_hdr *rarphdr;
-  unsigned char rarpframe[sizeof(ether_frame) + sizeof(struct _rarp_hdr)];
-  memset(rarpframe, 0, sizeof(rarpframe));
-  memcpy(rarpframe, ether_frame, sizeof(ether_frame));
-  memcpy(rarpframe + sizeof(ether_frame), &rarphdr, RARP_HDRLEN * sizeof (unsigned char));
-printf("%s %s\n", __func__, (errno ? strerror(errno) : "ok"));
-  // Submit request for a raw socket descriptor.
-  if ((sd = socket (PF_PACKET, SOCK_RAW, htons (ETH_P_ALL))) < 0) {
-    perror ("socket() failed ");
-    exit (EXIT_FAILURE);
-  }
-printf("%s %s\n", __func__, (errno ? strerror(errno) : "ok"));
-  // Listen for incoming ethernet frame from socket sd.
-  // We expect an ARP ethernet frame of the form:
-  //     MAC (6 bytes) + MAC (6 bytes) + ethernet type (2 bytes)
-  //     + ethernet data (ARP header) (28 bytes)
-  // Keep at it until we get an ARP reply.
-  rarphdr = (rarp_hdr *) (ether_frame + 6 + 6 + 2);
-  
-    if ((status = recv (sd, rarpframe,
-                            sizeof(rarpframe),
-                            0)) < 0) {
-      if (errno == EINTR) {
-        memset (ether_frame, 0, 14 * sizeof (unsigned char));
-        
-      } else {
-        perror ("recv() failed:");
-        exit (EXIT_FAILURE);
-      }
-  }
-  printf("%s %s\n", __func__, (errno ? strerror(errno) : "ok"));
-  close (sd);
-printf("%s %s\n", __func__, (errno ? strerror(errno) : "ok"));
-  // Print out contents of received ethernet frame.
-  printf ("\nEthernet frame header:\n");
-  printf ("Destination MAC (this node): ");
-  for (i=0; i<5; i++) {
-    printf ("%02x:", ether_frame[i]);
-  }
-  printf ("%02x\n", ether_frame[5]);
-  printf ("Source MAC: ");
-  for (i=0; i<5; i++) {
-    printf ("%02x:", ether_frame[i+6]);
-  }
-  printf ("%02x\n", ether_frame[11]);
-  // Next is ethernet type code (ETH_P_ARP for ARP).
-  // http://www.iana.org/assignments/ethernet-numbers
-  printf ("Ethernet type code (2054 = ARP): %u\n", ((ether_frame[12]) << 8) + ether_frame[13]);
-  printf ("\nEthernet data (ARP header):\n");
-  printf ("Hardware type (1 = ethernet (10 Mb)): %u\n", ntohs (rarphdr->htype));
-  printf ("Protocol type (2048 for IPv4 addresses): %u\n", ntohs (rarphdr->ptype));
-  printf ("Hardware (MAC) address length (bytes): %u\n", rarphdr->hlen);
-  printf ("Protocol (IPv4) address length (bytes): %u\n", rarphdr->plen);
-  printf ("Opcode (2 = ARP reply): %u\n", ntohs (rarphdr->opcode));
-  printf ("Sender hardware (MAC) address: ");
-  for (i=0; i<5; i++) {
-    printf ("%02x:", rarphdr->sender_mac[i]);
-  }
-  printf ("%02x\n", rarphdr->sender_mac[5]);
-  printf ("Sender protocol (IPv4) address: %u.%u.%u.%u\n",
-    rarphdr->sender_ip[0], rarphdr->sender_ip[1], rarphdr->sender_ip[2], rarphdr->sender_ip[3]);
-  printf ("Target (this node) hardware (MAC) address: ");
-  for (i=0; i<5; i++) {
-    printf ("%02x:", rarphdr->target_mac[i]);
-  }
-  printf ("%02x\n", rarphdr->target_mac[5]);
-  printf ("Target (this node) protocol (IPv4) address: %u.%u.%u.%u\n",
-    rarphdr->target_ip[0], rarphdr->target_ip[1], rarphdr->target_ip[2], rarphdr->target_ip[3]);
+	struct rarp_frame buf;
 
-  return (EXIT_SUCCESS);
+	memset(&buf, 0, sizeof(struct rarp_frame));
+	int sd;
+
+printf("%s 1 %s\n", __func__, (errno ? strerror(errno) : "ok"));
+
+	if (0 > (sd = socket (PF_PACKET, SOCK_RAW, htons (ETH_P_ALL)))) {perror ("socket() failed "); exit (EXIT_FAILURE);} //ETH_P_RARP
+
+printf("%s 2 %s\n", __func__, (errno ? strerror(errno) : "ok"));
+
+	if (0 > recv (sd, &buf, sizeof(struct rarp_frame), 0))
+	{
+		printf("%s recv %s\n", __func__, (errno ? strerror(errno) : "ok"));
+	}
+	
+	printf("%s 3 %s\n", __func__, (errno ? strerror(errno) : "ok"));
+
+	close (sd);
+
+	fprintf_rarp_frame(stdout, &buf);
+
+	printf("%s 5 %s\n", __func__, (errno ? strerror(errno) : "ok"));
+
+	return (EXIT_SUCCESS);
 }
-
