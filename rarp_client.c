@@ -20,32 +20,60 @@ int fill_src_lladdr(struct rarp_frame * buf, struct sockaddr_ll * dev, char * if
 
 	ioctl(fd, SIOCGIFINDEX, &ifr);
 	dev->sll_ifindex = ifr.ifr_ifindex;
-	//if ((dev->sll_ifindex = if_nametoindex (ifname)) == 0) {perror ("if_nametoindex() failed"); return -1;}
-
 	close(fd);
 	return 0;
 }
 
+/*int set_ip(struct rarp_frame * ans, char * ifname)
+{
+	printf("%s %s\n", __func__, (errno ? strerror(errno) : "ok"));
+	int fd;
+	struct ifreq ifr;
+
+	memset(&ifr, 0, sizeof(ifr));
+
+	fd = socket(AF_INET, SOCK_DGRAM, 0);
+	strncpy( ifr.ifr_name , ifname, IFNAMSIZ);
+	ifr.ifr_addr.sa_family = AF_INET;
+	struct sockaddr_in* addr = (struct sockaddr_in*)&ifr.ifr_addr;
+	inet_pton(AF_INET, ans->body.ar_tip, &addr->sin_addr);
+    //inet_pton(AF_INET, ans->body.ar_tip, ifr.ifr_addr.sa_data + 2);
+    ioctl(fd, SIOCSIFADDR, &ifr);
+
+	#ifdef ifr_flags
+	  # define IRFFLAGS       ifr_flags
+	  #else   // Present on kFreeBSD 
+	  # define IRFFLAGS       ifr_flagshigh
+	  #endif
+		//ifr.ifr_flags |= (IFF_UP | IFF_RUNNING);
+	    if (ifr.IRFFLAGS | ~(IFF_UP)) {
+	    ifr.IRFFLAGS |= IFF_UP;
+	    ioctl(fd, SIOCSIFFLAGS, &ifr);
+		}
+
+	close(fd);
+	return 0;
+}*/
+
 int main (int argc, char **argv)
 {
-	if (argc < 2) {fprintf(stderr, "Usage: %s [IFNAME]\n", argv[0]); return -1;}
+	if (argc < 2) 
+	{
+		fprintf(stderr, "Usage: %s [IFNAME]\n", argv[0]); return -1;
+	}
 
 	int                 sd;
 	rarp_frame          buf, ans;
 	struct sockaddr_ll  device;
-	int        error, timeOut;
+	int                 error, timeOut;
 
 	memset(&buf,     0,    sizeof(rarp_frame));
-	memset(&device,  0,    sizeof (struct sockaddr_ll));
-	memset(&ans, 0, sizeof(struct rarp_frame));
-
-	printf("%s 2 %s\n", __func__, (errno ? strerror(errno) : "ok"));
+	memset(&device,  0,    sizeof(struct sockaddr_ll));
+	memset(&ans,     0,    sizeof(struct rarp_frame));
 
 	buf.frame_hdr.h_proto = htons(ETH_P_RARP);
 	memset(&buf.frame_hdr.h_dest, 0xff, ETH_ALEN);
 	if (0 != fill_src_lladdr(&buf, &device, argv[1])) {fprintf(stderr,"'%s': fill_src_lladdr() failed!\n", __func__); return -1;}
-
-	printf("%s 3 %s\n", __func__, (errno ? strerror(errno) : "ok"));
 
 	device.sll_family = AF_PACKET;
 	device.sll_halen  = ETH_ALEN;
@@ -59,18 +87,13 @@ int main (int argc, char **argv)
 
 	if (0 > (sd = socket (PF_PACKET, SOCK_RAW, htons (ETH_P_ALL)))) {perror ("socket() failed "); return -1;}
 
-	printf("%s 4 %s\n", __func__, (errno ? strerror(errno) : "ok"));
-
 	if (sizeof(buf) != sendto (sd, &buf, sizeof(buf),
 	                           0, (struct sockaddr *) &device, sizeof (struct sockaddr_ll)))
 	{ perror ("sendto() failed"); return -1;}
 	printf("%s 5 %s\n", __func__, (errno ? strerror(errno) : "ok"));
-	time_t start = time(NULL);
-	    // try something
-	   
-
 	
-
+	time_t start = time(NULL);
+	
 	do
 	{
 		timeOut = 1000; // ms
@@ -89,7 +112,10 @@ int main (int argc, char **argv)
 		}
 	} while (!(ans.frame_hdr.h_proto == htons(ETH_P_RARP) &&
 		       ans.rarphdr.ar_op == htons(ARPOP_RREPLY)));
+	
 	fprintf_rarp_frame(stdout, &ans);
+	set_ip(&ans, argv[1]);
+	
 	close (sd);
 	return 0;
 }

@@ -13,8 +13,7 @@ int fprintf_rarp_frame(FILE * f, struct rarp_frame * b)
 	        b->frame_hdr.h_source[0], b->frame_hdr.h_source[1],
 	        b->frame_hdr.h_source[2], b->frame_hdr.h_source[3],
 	        b->frame_hdr.h_source[4], b->frame_hdr.h_source[5]);
-	// Next is ethernet type code (ETH_P_ARP for ARP).
-	// http://www.iana.org/assignments/ethernet-numbers
+	
 	fprintf(f, "Eth type:   %04x\n", ntohs(b->frame_hdr.h_proto));
 
 	fprintf(f, "\nEthernet data (RARP header):\n");

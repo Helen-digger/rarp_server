@@ -45,11 +45,10 @@ typedef struct rarp_frame
 
 typedef struct rarp_entry
 {
-unsigned char mac[ETH_ALEN];
-unsigned char ip[4];
-char ifname[IFNAMSIZE1];
+	unsigned char mac[ETH_ALEN];
+	unsigned char ip[4];
+	char ifname[IFNAMSIZE1];
 } rarp_entry;
 
 int fprintf_rarp_frame(FILE * f, struct rarp_frame * b);
 int isReadable(int sock, int * error, int timeOut);
-
