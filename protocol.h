@@ -17,11 +17,15 @@
 #include <linux/if_packet.h>
 #include <linux/if_arp.h>
 
-#define ARP_CACHE       "/proc/net/arp"
+//#include <sys/time.h>
+#include <time.h>
+
+#define IFNAMSIZE1 16
+//#define RARP_CACHE       "/home/helen/Desktop/rarp_server/rarp_table"
+#define RARP_CACHE       "rarp_table"
 #define ARP_STRING_LEN  200
 #define ARP_BUFFER_LEN  (ARP_STRING_LEN + 1)
-
-#define ARP_LINE_FORMAT "%100s %*s 0x%100s %100s %*s %100s"
+#define SOCKET_ERROR -1
 
 typedef struct rarp_payload
 {
@@ -38,3 +42,14 @@ typedef struct rarp_frame
 	rarp_payload   body;
 	unsigned char  trailer[18];
 } rarp_frame;
+
+typedef struct rarp_entry
+{
+unsigned char mac[ETH_ALEN];
+unsigned char ip[4];
+char ifname[IFNAMSIZE1];
+} rarp_entry;
+
+int fprintf_rarp_frame(FILE * f, struct rarp_frame * b);
+int isReadable(int sock, int * error, int timeOut);
+

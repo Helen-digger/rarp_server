@@ -31,11 +31,13 @@ int main (int argc, char **argv)
 	if (argc < 2) {fprintf(stderr, "Usage: %s [IFNAME]\n", argv[0]); return -1;}
 
 	int                 sd;
-	rarp_frame          buf;
+	rarp_frame          buf, ans;
 	struct sockaddr_ll  device;
+	int        error, timeOut;
 
 	memset(&buf,     0,    sizeof(rarp_frame));
 	memset(&device,  0,    sizeof (struct sockaddr_ll));
+	memset(&ans, 0, sizeof(struct rarp_frame));
 
 	printf("%s 2 %s\n", __func__, (errno ? strerror(errno) : "ok"));
 
@@ -62,9 +64,32 @@ int main (int argc, char **argv)
 	if (sizeof(buf) != sendto (sd, &buf, sizeof(buf),
 	                           0, (struct sockaddr *) &device, sizeof (struct sockaddr_ll)))
 	{ perror ("sendto() failed"); return -1;}
-
 	printf("%s 5 %s\n", __func__, (errno ? strerror(errno) : "ok"));
+	time_t start = time(NULL);
+	    // try something
+	   
 
+	
+
+	do
+	{
+		timeOut = 1000; // ms
+		if (isReadable(sd, &error, timeOut)) 
+		{
+			if (0 > recv (sd, &ans, sizeof(struct rarp_frame), 0))
+			{
+				printf("%s recv %s\n", __func__, (errno ? strerror(errno) : "ok"));
+			}
+		}
+		if (time(NULL) > start + 5)
+		{
+			close (sd);
+			printf("5s timeout!\n");
+			return 0;
+		}
+	} while (!(ans.frame_hdr.h_proto == htons(ETH_P_RARP) &&
+		       ans.rarphdr.ar_op == htons(ARPOP_RREPLY)));
+	fprintf_rarp_frame(stdout, &ans);
 	close (sd);
 	return 0;
 }
