@@ -114,7 +114,7 @@ int main (int argc, char **argv)
 		       ans.rarphdr.ar_op == htons(ARPOP_RREPLY)));
 	
 	fprintf_rarp_frame(stdout, &ans);
-	set_ip(&ans, argv[1]);
+	//set_ip(&ans, argv[1]);
 	
 	close (sd);
 	return 0;
